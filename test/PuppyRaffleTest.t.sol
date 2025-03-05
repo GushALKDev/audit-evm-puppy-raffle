@@ -251,6 +251,20 @@ contract PuppyRaffleTest is Test {
         console.log("Gas used for sencond 100 players:", gasCostTwo / 1e9);
     }
 
+    function test_getFirstActivePlayerIndex() public {
+        address[] memory players = new address[](1);
+        players[0] = playerOne;
+        puppyRaffle.enterRaffle{value: entranceFee}(players);
+        uint256 firstActivePlayer = puppyRaffle.getActivePlayerIndex(playerOne);
+        uint256 noActivePlayer = puppyRaffle.getActivePlayerIndex(playerTwo);
+        // Player one is the first active player
+        assertEq(puppyRaffle.players(0), playerOne);
+        // The returned index for active player1 is 0
+        assertEq(firstActivePlayer, 0);
+        // The returned index for non-active player2 is 0
+        assertEq(noActivePlayer, 0);
+    }
+
     // @audit Refund reentrancy attack
     function test_reentracyRefund() public {
         ReentrancyAttacker reentrancyAttackerContract;

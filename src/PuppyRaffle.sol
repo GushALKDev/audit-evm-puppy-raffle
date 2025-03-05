@@ -105,7 +105,6 @@ contract PuppyRaffle is ERC721, Ownable {
         payable(msg.sender).sendValue(entranceFee);
 
         players[playerIndex] = address(0);
-        
         emit RaffleRefunded(playerAddress);
     }
 

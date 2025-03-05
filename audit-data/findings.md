@@ -212,10 +212,10 @@ Place the following test into `PuppyRaffleTest.t.sol`.
 2. Consider using a mapping to check for duplicates. This would allow constant time lookup of whether a user has already entered.
 
 ```diff
-+ uint256 public raffleId;
-+ mapping(address => uint256) public addressToRaffleId;
++   uint256 public raffleId;
++   mapping(address => uint256) public addressToRaffleId;
 
-constructor(uint256 _entranceFee, address _feeAddress, uint256 _raffleDuration) ERC721("Puppy Raffle", "PR") {
+    constructor(uint256 _entranceFee, address _feeAddress, uint256 _raffleDuration) ERC721("Puppy Raffle", "PR") {
         entranceFee = _entranceFee;
         feeAddress = _feeAddress;
         raffleDuration = _raffleDuration;
@@ -232,21 +232,21 @@ constructor(uint256 _entranceFee, address _feeAddress, uint256 _raffleDuration) 
 +       raffleId = 1;
     }
 
-function enterRaffle(address[] memory newPlayers) public payable {
-    require(msg.value == entranceFee * newPlayers.length, "PuppyRaffle: Must send enough to enter raffle");
--    for (uint256 i = 0; i < newPlayers.length; i++) {
--        players.push(newPlayers[i]);
--    }
-    for (uint256 i = 0; i < players.length - 1; i++) {
--        for (uint256 j = i + 1; j < players.length; j++) {
--            require(players[i] != players[j], "PuppyRaffle: Duplicate player");
--        }
-+       require(addressToRaffleId[newPlayers[i]] != raffleId, "PuppyRaffle: Duplicate player");
-+       players.push(newPlayers[i]);
+    function enterRaffle(address[] memory newPlayers) public payable {
+        require(msg.value == entranceFee * newPlayers.length, "PuppyRaffle: Must send enough to enter raffle");
+-       for (uint256 i = 0; i < newPlayers.length; i++) {
+-           players.push(newPlayers[i]);
+-       }
+        for (uint256 i = 0; i < players.length - 1; i++) {
+-           for (uint256 j = i + 1; j < players.length; j++) {
+-               require(players[i] != players[j], "PuppyRaffle: Duplicate player");
+-           }
++          require(addressToRaffleId[newPlayers[i]] != raffleId, "PuppyRaffle: Duplicate player");
++          players.push(newPlayers[i]);
+        }
     }
-}
 
-function selectWinner() external {
+    function selectWinner() external {
         require(block.timestamp >= raffleStartTime + raffleDuration, "PuppyRaffle: Raffle not over");
         require(players.length >= 4, "PuppyRaffle: Need at least 4 players");
         uint256 winnerIndex = uint256(keccak256(abi.encodePacked(msg.sender, block.timestamp, block.difficulty))) % players.length;
@@ -275,5 +275,52 @@ function selectWinner() external {
         require(success, "PuppyRaffle: Failed to send prize pool to winner");
         _safeMint(winner, tokenId);
 +      raffleId++;
+    }
+```
+
+### [L-1] Request getActivePlayerIndex through `PuppyRaffle::getActivePlayerIndex()` returns 0 both when the user is not in the array and when the user is the first player that entered on the raffle. The player might think they are not active.
+
+**Description:** If the first player request their player index, they will get 0, on the same way that if they are not participating.
+
+**Impact:** The player might think they are not participating in the raffle.
+
+**Proof of Concept:**
+
+<details>
+<summary>PoC</summary>
+Place the following test into `PuppyRaffleTest.t.sol`.
+
+```javascript
+    function test_getFirstActivePlayerIndex() public {
+        address[] memory players = new address[](1);
+        players[0] = playerOne;
+        puppyRaffle.enterRaffle{value: entranceFee}(players);
+        uint256 firstActivePlayer = puppyRaffle.getActivePlayerIndex(playerOne);
+        uint256 noActivePlayer = puppyRaffle.getActivePlayerIndex(playerTwo);
+        // Player one is the first active player
+        assertEq(puppyRaffle.players(0), playerOne);
+        // The returned index for active player1 is 0
+        assertEq(firstActivePlayer, 0);
+        // The returned index for non-active player2 is 0
+        assertEq(noActivePlayer, 0);
+    }
+```
+</details>
+
+**Recommended Mitigation:**
+
+- Return a pair of values (uint256 index, bool found)
+
+```diff
+-   function getActivePlayerIndex(address player) external view returns (uint256) {
++   function getActivePlayerIndex(address player) external view returns (uint256, bool) {
+        for (uint256 i = 0; i < players.length; i++) {
+            if (players[i] == player) {
+-               return i;
++               return (i, true);
+            }
+        }
+-       return 0;
++       return (0, false);
     }
 ```
