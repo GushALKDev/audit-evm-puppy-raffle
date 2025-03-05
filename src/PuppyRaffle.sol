@@ -77,12 +77,16 @@ contract PuppyRaffle is ERC721, Ownable {
     /// @notice duplicate entrants are not allowed
     /// @param newPlayers the list of players to enter the raffle
     function enterRaffle(address[] memory newPlayers) public payable {
+        // @audit - Q - Were custom reverts a thing in 0.7.6 of Solidity?
+        // @audit - Q - What if it´s zero?
         require(msg.value == entranceFee * newPlayers.length, "PuppyRaffle: Must send enough to enter raffle");
         for (uint256 i = 0; i < newPlayers.length; i++) {
+            // @audit - Q - What resets the players array?
             players.push(newPlayers[i]);
         }
 
         // Check for duplicates
+        // @audit - DoS - This could be a DoS vector if the array is too large
         for (uint256 i = 0; i < players.length - 1; i++) {
             for (uint256 j = i + 1; j < players.length; j++) {
                 require(players[i] != players[j], "PuppyRaffle: Duplicate player");
@@ -101,6 +105,7 @@ contract PuppyRaffle is ERC721, Ownable {
         payable(msg.sender).sendValue(entranceFee);
 
         players[playerIndex] = address(0);
+        
         emit RaffleRefunded(playerAddress);
     }
 
@@ -113,6 +118,8 @@ contract PuppyRaffle is ERC721, Ownable {
                 return i;
             }
         }
+        // @audit - Q - What if the player is the player at index 0?
+        // @audit - If the player is at index 0, it will return 0 and the player might think they are not active.
         return 0;
     }
 

