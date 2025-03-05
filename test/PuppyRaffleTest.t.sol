@@ -251,6 +251,39 @@ contract PuppyRaffleTest is Test {
         console.log("Gas used for sencond 100 players:", gasCostTwo / 1e9);
     }
 
+    function test_totalFeesOverFlow() public {
+        console.log("Total fees max for uint64:", uint256(type(uint64).max)/1e18);
+        uint64 lastTotalFees = 0;
+        bool anotherLoop = true;
+        uint256 loop = 1;
+        uint256 playersNumber = 100;
+        do {
+            address[] memory players = new address[](playersNumber);
+            for (uint256 i = 0; i < playersNumber; i++) {
+                players[i] = address(i);
+            }
+            
+            // Enter players to the raffle
+            puppyRaffle.enterRaffle{value: entranceFee * playersNumber}(players);
+
+            // Select the winner
+            vm.warp(block.timestamp + duration + 1);
+            vm.roll(block.number + 1);
+            puppyRaffle.selectWinner();
+
+            uint64 totalFees = puppyRaffle.totalFees();
+            console.log("Total fees at loop %s: %s ETH", loop, uint256(totalFees/1e18));
+
+            if (totalFees < lastTotalFees) {
+                anotherLoop = false;
+            }
+            lastTotalFees = totalFees;
+            loop++;
+        } while (anotherLoop);
+        console.log("-------------------");
+        console.log("Total fees overflowed at loop %s with %s entries:", loop, playersNumber*loop);
+    }
+
     function test_getFirstActivePlayerIndex() public {
         address[] memory players = new address[](1);
         players[0] = playerOne;

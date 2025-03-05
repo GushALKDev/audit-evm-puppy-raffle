@@ -13,10 +13,9 @@ docs/
 # Dotenv file
 .env
 
-broadcast
-.DS_Store
-
 # Others
 lib/
 *-layout.md
 process.md
+broadcast
+.DS_Store
