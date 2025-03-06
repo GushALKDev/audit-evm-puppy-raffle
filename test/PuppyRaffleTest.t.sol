@@ -213,7 +213,7 @@ contract PuppyRaffleTest is Test {
         assertEq(address(feeAddress).balance, expectedPrizeAmount);
     }
 
-    // @audit PoC DoS attack
+    // @test_audit PoC DoS attack
     function test_dnialOfService() public {
         // Let´s enter 100 players
         uint256 playersNumber = 100;
@@ -298,7 +298,7 @@ contract PuppyRaffleTest is Test {
         assertEq(noActivePlayer, 0);
     }
 
-    // @audit Refund reentrancy attack
+    // @test_audit Refund reentrancy attack
     function test_reentracyRefund() public {
         ReentrancyAttacker reentrancyAttackerContract;
         reentrancyAttackerContract = new ReentrancyAttacker(puppyRaffle);

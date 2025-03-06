@@ -77,16 +77,16 @@ contract PuppyRaffle is ERC721, Ownable {
     /// @notice duplicate entrants are not allowed
     /// @param newPlayers the list of players to enter the raffle
     function enterRaffle(address[] memory newPlayers) public payable {
-        // @audit - Q - Were custom reverts a thing in 0.7.6 of Solidity?
-        // @audit - Q - What if it´s zero?
+        // @audit - N - What if it´s zero?
+        // @audit - N - FIX: We should require that the newPlayers array is not empty.
+        // @audit - N - require(newPlayers.length > 0, "PuppyRaffle: newPlayers array must not be empty");
         require(msg.value == entranceFee * newPlayers.length, "PuppyRaffle: Must send enough to enter raffle");
         for (uint256 i = 0; i < newPlayers.length; i++) {
-            // @audit - Q - What resets the players array?
             players.push(newPlayers[i]);
         }
 
         // Check for duplicates
-        // @audit - DoS - This could be a DoS vector if the array is too large
+        // @audit - N - DoS - This could be a DoS vector if the array is too large
         for (uint256 i = 0; i < players.length - 1; i++) {
             for (uint256 j = i + 1; j < players.length; j++) {
                 require(players[i] != players[j], "PuppyRaffle: Duplicate player");
@@ -117,8 +117,9 @@ contract PuppyRaffle is ERC721, Ownable {
                 return i;
             }
         }
-        // @audit - Q - What if the player is the player at index 0?
-        // @audit - If the player is at index 0, it will return 0 and the player might think they are not active.
+        // @audit - N - What if the player is the player at index 0?
+        // @audit - N - If the player is at index 0, it will return 0 and the player might think they are not active.
+        // @audit - N - FIX: We can return a pair of values, the index and a boolean that indicates if the player is active or not.
         return 0;
     }
 
@@ -129,27 +130,32 @@ contract PuppyRaffle is ERC721, Ownable {
     /// @dev we reset the active players array after the winner is selected
     /// @dev we send 80% of the funds to the winner, the other 20% goes to the feeAddress
     function selectWinner() external {
+        // @audit - N - Follow it CEI ? No.
+        // @audit - N - INFO: Reccomend to use the CEI pattern.
         require(block.timestamp >= raffleStartTime + raffleDuration, "PuppyRaffle: Raffle not over");
         require(players.length >= 4, "PuppyRaffle: Need at least 4 players");
-        // @audit - Randomness - This is not a secure way to generate randomness. It is possible to manipulate the outcome of the raffle.
+        // @audit - N - Randomness - This is not a secure way to generate randomness. It is possible to manipulate the outcome of the raffle.
         uint256 winnerIndex =
             uint256(keccak256(abi.encodePacked(msg.sender, block.timestamp, block.difficulty))) % players.length;
         address winner = players[winnerIndex];
-        // @audit - Q - Why not just address(this).balance?
+        // @audit - N - Why not just address(this).balance?
+        // @audit - N - INFO: It is better to use address(this).balance
         uint256 totalAmountCollected = players.length * entranceFee;
-        // @audit - Q - Is right this 80%?
         uint256 prizePool = (totalAmountCollected * 80) / 100;
-        // @audit - Q - Is not better to use  totalAmountCollected - prizePool?
+        // @audit - N - Is not better to use totalAmountCollected - prizePool?
+        // @audit - N - INFO: It is better to use totalAmountCollected - prizePool.
         uint256 fee = (totalAmountCollected * 20) / 100;
-        // @audit - Q - Why this casting here? Could it overflow?
-        // @audit - FIX: Using safeMaths, newer versions of solidity and using bigger uints.
+        // @audit - N - Why this casting here? Could it overflow?
+        // @audit - N - FIX: fee variante should be uint256, not uint64.
+        // @audit - N - FIX: Using safeMaths, newer versions of solidity and using bigger uints.
         totalFees = totalFees + uint64(fee);
-        // @audit - When we mint a new Piggy, we use the totalSupply as the tokenId
-        // @audit - Q - Where do we increment the tokenId/totalSupply?
+        // @audit - S - When we mint a new Piggy, we use the totalSupply as the tokenId
+        // @audit - S - Where do we increment the tokenId/totalSupply?
+        // @audit - S - The totalSupply is incremented when we mint a new Piggy.
         uint256 tokenId = totalSupply();
 
         // We use a different RNG calculate from the winnerIndex to determine rarity
-        // @audit - Randomness - This is not a secure way to generate randomness. It is possible to manipulate the outcome of the raffle.
+        // @audit - N - Randomness - This is not a secure way to generate randomness. It is possible to manipulate the outcome of the raffle.
         uint256 rarity = uint256(keccak256(abi.encodePacked(msg.sender, block.difficulty))) % 100;
         if (rarity <= COMMON_RARITY) {
             tokenIdToRarity[tokenId] = COMMON_RARITY;
@@ -162,25 +168,23 @@ contract PuppyRaffle is ERC721, Ownable {
         delete players;
         raffleStartTime = block.timestamp;
         previousWinner = winner;
-        // @audit - Q - Can we reenter somewhere here? It is probably protected by the raffleStartTime and the players array.
-        // @audit - Q - What if the winner is a contract with a fallback function that will revert?
-        // @audit - The winner wouldn´t get the money if their fallback function reverts.
         (bool success,) = winner.call{value: prizePool}("");
         require(success, "PuppyRaffle: Failed to send prize pool to winner");
         _safeMint(winner, tokenId);
+        // @audit - N - Are we missing an event here?
     }
 
     /// @notice this function will withdraw the fees to the feeAddress
     function withdrawFees() external {
-        // @audit - Q - Then if there are players, we can´t withdraw the fees?
-        // @audit - This is vulnerable to self-destructing contracts, if a self-contract send some ETH to this contract, it will be locked forever.
-        // @audit - FIX: We should use the players array to check if there are players or not. (require(players.length == 0, "PuppyRaffle: There are currently players active!");)
+        // @audit - N - INFO: If there are players, we can´t withdraw the fees (MEV).
+        // @audit - N - This is vulnerable to self-destructing contracts, if a self-contract send some ETH to this contract, it will be locked forever.
+        // @audit - N - FIX: We should use the players array to check if there are players or not. (require(players.length == 0, "PuppyRaffle: There are currently players active!");)
         require(address(this).balance == uint256(totalFees), "PuppyRaffle: There are currently players active!");
         uint256 feesToWithdraw = totalFees;
         totalFees = 0;
-        // @audit - Q - What if the feeAddress is a contract with a fallback function that will revert?
         (bool success,) = feeAddress.call{value: feesToWithdraw}("");
         require(success, "PuppyRaffle: Failed to withdraw fees");
+        // @audit - N - Are we missing an event here?
     }
 
     /// @notice only the owner of the contract can change the feeAddress
@@ -191,6 +195,7 @@ contract PuppyRaffle is ERC721, Ownable {
     }
 
     /// @notice this function will return true if the msg.sender is an active player
+    // @audit - N - INFO - Function unused
     function _isActivePlayer() internal view returns (bool) {
         for (uint256 i = 0; i < players.length; i++) {
             if (players[i] == msg.sender) {
