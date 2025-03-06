@@ -144,9 +144,12 @@ contract PuppyRaffle is ERC721, Ownable {
         // @audit - Q - Why this casting here? Could it overflow?
         // @audit - FIX: Using safeMaths, newer versions of solidity and using bigger uints.
         totalFees = totalFees + uint64(fee);
+        // @audit - When we mint a new Piggy, we use the totalSupply as the tokenId
+        // @audit - Q - Where do we increment the tokenId/totalSupply?
         uint256 tokenId = totalSupply();
 
         // We use a different RNG calculate from the winnerIndex to determine rarity
+        // @audit - Randomness - This is not a secure way to generate randomness. It is possible to manipulate the outcome of the raffle.
         uint256 rarity = uint256(keccak256(abi.encodePacked(msg.sender, block.difficulty))) % 100;
         if (rarity <= COMMON_RARITY) {
             tokenIdToRarity[tokenId] = COMMON_RARITY;
@@ -159,6 +162,9 @@ contract PuppyRaffle is ERC721, Ownable {
         delete players;
         raffleStartTime = block.timestamp;
         previousWinner = winner;
+        // @audit - Q - Can we reenter somewhere here? It is probably protected by the raffleStartTime and the players array.
+        // @audit - Q - What if the winner is a contract with a fallback function that will revert?
+        // @audit - The winner wouldn´t get the money if their fallback function reverts.
         (bool success,) = winner.call{value: prizePool}("");
         require(success, "PuppyRaffle: Failed to send prize pool to winner");
         _safeMint(winner, tokenId);
@@ -166,9 +172,13 @@ contract PuppyRaffle is ERC721, Ownable {
 
     /// @notice this function will withdraw the fees to the feeAddress
     function withdrawFees() external {
+        // @audit - Q - Then if there are players, we can´t withdraw the fees?
+        // @audit - This is vulnerable to self-destructing contracts, if a self-contract send some ETH to this contract, it will be locked forever.
+        // @audit - FIX: We should use the players array to check if there are players or not. (require(players.length == 0, "PuppyRaffle: There are currently players active!");)
         require(address(this).balance == uint256(totalFees), "PuppyRaffle: There are currently players active!");
         uint256 feesToWithdraw = totalFees;
         totalFees = 0;
+        // @audit - Q - What if the feeAddress is a contract with a fallback function that will revert?
         (bool success,) = feeAddress.call{value: feesToWithdraw}("");
         require(success, "PuppyRaffle: Failed to withdraw fees");
     }
