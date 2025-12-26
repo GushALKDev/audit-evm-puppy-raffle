@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.7.6;
+// @audit-info Use of floating pragma is bad
 
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
@@ -141,6 +142,10 @@ contract PuppyRaffle is ERC721, Ownable {
         // @audit - N - Why not just address(this).balance?
         // @audit - N - INFO: It is better to use address(this).balance
         uint256 totalAmountCollected = players.length * entranceFee;
+        // @audit-info Magic Numbers
+        // uint256 public constant PRIZE_POOL_PERCENTAGE = 80
+        // uint256 public constant FEE_PERCENTAGE = 20
+        // uint256 public constant POOL_PRECISION = 100
         uint256 prizePool = (totalAmountCollected * 80) / 100;
         // @audit - N - Is not better to use totalAmountCollected - prizePool?
         // @audit - N - INFO: It is better to use totalAmountCollected - prizePool.
