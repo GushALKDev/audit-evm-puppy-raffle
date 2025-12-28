@@ -496,6 +496,29 @@ Gate withdrawals with raffle state (`players.length == 0`) instead of strict bal
 
 Optionally: keep explicit accounting and ensure withdrawals do not depend on strict `address(this).balance == totalFees` equality.
 
+
+### [M-4] `abi.encodePacked()` should not be used with dynamic types when passing the result to a hash function such as `keccak256()`
+
+IMPACT: HIGH
+LIKELIHOOD: LOW
+
+**Description:** The `tokenURI()` function uses `abi.encodePacked()` with dynamic types (strings) when constructing the token metadata JSON. This can lead to hash collisions when different inputs produce the same packed encoding.
+
+For example: `abi.encodePacked("a", "bc")` produces the same result as `abi.encodePacked("ab", "c")`.
+
+Found in:
+- `src/PuppyRaffle.sol` Line 244
+- `src/PuppyRaffle.sol` Line 248
+
+**Impact:** While in this specific case the impact is limited since the strings are mostly hardcoded, using `abi.encodePacked()` with dynamic types is a dangerous pattern that can lead to hash collisions in other contexts.
+
+**Recommended Mitigation:** Use `abi.encode()` instead, which pads items to 32 bytes preventing hash collisions. Alternatively, if all arguments are strings, use `bytes.concat()`.
+
+```diff
+-   abi.encodePacked(
++   abi.encode(
+```
+
 ### [L-1] Request getActivePlayerIndex through `PuppyRaffle::getActivePlayerIndex()` returns 0 both when the user is not in the array and when the user is the first player that entered on the raffle. The player might think they are not active.
 
 **Description:** If the first player request their player index, they will get 0, on the same way that if they are not participating.
@@ -724,6 +747,19 @@ If keeping push-payments, prevent re-entry into `enterRaffle()` while a winner i
 ```
 
 
+### [L-5] Centralization Risk for trusted owners.
+
+**Description:** The contract inherits from `Ownable` and has privileged functions that only the owner can call, specifically `changeFeeAddress()`.
+
+Found in:
+- `src/PuppyRaffle.sol` Line 20: `contract PuppyRaffle is ERC721, Ownable`
+- `src/PuppyRaffle.sol` Line 212: `function changeFeeAddress(address newFeeAddress) external onlyOwner`
+
+**Impact:** Users must trust the owner to not perform malicious updates. The owner could redirect all fees to a different address at any time.
+
+**Recommended Mitigation:** Consider implementing a multi-sig or DAO governance for critical functions, or use a timelock mechanism to give users time to react to changes.
+
+
 ### [G-1] Several storage variables could be constants/immutables to reduce gas.
 
 **Description:**
@@ -837,3 +873,48 @@ This can diverge from the real balance due to refunds, forced ETH, or other edge
 **Impact:** Operational clarity.
 
 **Recommended Mitigation:** Document the intended fee withdrawal policy and ensure the checks match that policy.
+
+
+### [I-11] `public` functions not used internally could be marked `external`.
+
+**Description:** Several functions are marked as `public` but are never called internally within the contract.
+
+- `enterRaffle()` - Line 87
+- `refund()` - Line 109
+- `tokenURI()` - Line 236
+
+**Impact:** Using `external` instead of `public` for functions that are only called externally can save gas, as `external` functions can read arguments directly from calldata instead of copying them to memory.
+
+**Recommended Mitigation:** Change visibility from `public` to `external`.
+
+```diff
+-   function enterRaffle(address[] memory newPlayers) public payable {
++   function enterRaffle(address[] calldata newPlayers) external payable {
+
+-   function refund(uint256 playerIndex) public {
++   function refund(uint256 playerIndex) external {
+```
+
+
+### [I-12] Events are missing `indexed` fields.
+
+**Description:** Index event fields make the field more quickly accessible to off-chain tools that parse events. The following events lack indexed fields:
+
+- `event RaffleEnter(address[] newPlayers);` - Line 59
+- `event RaffleRefunded(address player);` - Line 60
+- `event FeeAddressChanged(address newFeeAddress);` - Line 61
+
+**Impact:** Off-chain tools and indexers will have a harder time filtering and searching for specific events.
+
+**Recommended Mitigation:** Add `indexed` keyword to important event parameters.
+
+```diff
+-   event RaffleEnter(address[] newPlayers);
++   event RaffleEnter(address[] indexed newPlayers);
+
+-   event RaffleRefunded(address player);
++   event RaffleRefunded(address indexed player);
+
+-   event FeeAddressChanged(address newFeeAddress);
++   event FeeAddressChanged(address indexed newFeeAddress);
+```
