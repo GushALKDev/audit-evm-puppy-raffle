@@ -2,7 +2,7 @@
 pragma solidity ^0.7.6;
 pragma experimental ABIEncoderV2;
 
-// @audit-info Test coverage is poor
+// @audit-info-written Test coverage is poor
 /*
 ╭------------------------------+----------------+-----------------+----------------+----------------╮
 | File                         | % Lines        | % Statements    | % Branches     | % Funcs        |
