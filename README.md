@@ -199,6 +199,8 @@ Strict equality check `address(this).balance == totalFees` breaks if ETH is forc
 
 ## 🎯 Section 4 NFT Exploit Challenge
 
+![NFT Exploit Challenge](./images/S4_NFT.png)
+
 Successfully exploited a CTF challenge using weak on-chain randomness. The challenge used:
 
 ```solidity
