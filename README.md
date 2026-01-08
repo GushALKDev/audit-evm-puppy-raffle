@@ -89,74 +89,20 @@ The **PuppyRaffle** contract contains **critical security vulnerabilities** that
 
 ### 🔴 High Severity
 
-#### [H-1] Reentrancy in `refund()` Allows Draining All Funds
-
-**Location:** `PuppyRaffle::refund()`
-
-The function sends ETH before updating state, allowing recursive calls via `receive()` to drain the contract.
-
-```solidity
-// ❌ Vulnerable - external call BEFORE state update
-payable(msg.sender).sendValue(entranceFee);
-players[playerIndex] = address(0);  // Too late!
-```
-
-**Fix:** Apply CEI pattern — update state before external calls.
-
----
-
-#### [H-2] Weak On-Chain Randomness Allows Winner Manipulation
-
-**Location:** `PuppyRaffle::selectWinner()`
-
-Uses predictable values (`msg.sender`, `block.timestamp`, `block.difficulty`) for RNG:
-
-```solidity
-uint256 winnerIndex = uint256(keccak256(abi.encodePacked(
-    msg.sender, block.timestamp, block.difficulty
-))) % players.length;
-```
-
-**Impact:** Attackers/miners can brute-force or influence the winning address.
-
-**Fix:** Use Chainlink VRF or commit-reveal scheme.
+| ID | Finding | Location |
+|----|---------|----------|
+| H-1 | Reentrancy in `refund()` allows draining all funds | `refund()` |
+| H-2 | Weak on-chain randomness allows winner manipulation | `selectWinner()` |
 
 ---
 
 ### 🟠 Medium Severity
 
-#### [M-1] DoS via O(n²) Duplicate Check Loop
-
-**Location:** `PuppyRaffle::enterRaffle()`
-
-Nested loop for duplicate checking has quadratic gas costs:
-
-| Players | Gas Cost |
-|---------|----------|
-| 100 | ~6.5M |
-| 200 | ~19M (exceeds block limit) |
-
-**Fix:** Use mapping for O(1) lookups: `mapping(address => uint256) addressToRaffleId`.
-
----
-
-#### [M-2] `uint64 totalFees` Overflow Breaks Withdrawals
-
-**Location:** `PuppyRaffle::selectWinner()`
-
-Fee is truncated: `totalFees = totalFees + uint64(fee)`. When fees exceed ~18.4 ETH, value wraps and `withdrawFees()` reverts.
-
-**Fix:** Use `uint256` for `totalFees`.
-
----
-
-#### [M-3] Forced ETH via `selfdestruct` Locks Fees Forever
-
-**Location:** `PuppyRaffle::withdrawFees()`
-
-Strict equality check `address(this).balance == totalFees` breaks if ETH is force-sent.
-
-**Fix:** Check `players.length == 0` instead.
+| ID | Finding | Location |
+|----|---------|----------|
+| M-1 | DoS via O(n²) duplicate check loop | `enterRaffle()` |
+| M-2 | `uint64 totalFees` overflow breaks withdrawals | `selectWinner()` |
+| M-3 | Forced ETH via `selfdestruct` locks fees forever | `withdrawFees()` |
 
 ---
 
